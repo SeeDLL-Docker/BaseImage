@@ -64,7 +64,7 @@ COPY --from=xx / /
 RUN apk --no-cache add curl make clang && \
     xx-apk --no-cache add gcc musl-dev && \
     mkdir /tmp/su-exec && \
-    curl -# -L https://github.com/ncopa/su-exec/archive/v0.2.tar.gz | tar xz --strip 1 -C /tmp/su-exec
+    curl -# -L https://github.com/ncopa/su-exec/archive/v0.2.tar.gz | tar xz --strip 1 -C /tmp/su-exec && \
     CC=xx-clang \
     CFLAGS="-Os -fomit-frame-pointer" \
     LDFLAGS="-static -Wl,--strip-all" \
