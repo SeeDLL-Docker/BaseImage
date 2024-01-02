@@ -1,0 +1,225 @@
+name: Docker Baseimage CI/CD
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_IMAGE_NAME: seedll/baseimage
+
+on:
+  push:
+    branches: '*'
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-pre.[0-9]+
+  pull_request:
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-20.04
+
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
+    strategy:
+      fail-fast: false
+      matrix:
+        info:
+          - '{ "tag_prefix": "alpine-3.18",  "baseimage": "alpine:3.18",    "platforms": "linux/amd64,linux/386,linux/arm/v6,linux/arm/v7,linux/arm64/v8" }'
+          - '{ "tag_prefix": "alpine-3.19",  "baseimage": "alpine:3.19",    "platforms": "linux/amd64,linux/386,linux/arm/v6,linux/arm/v7,linux/arm64/v8" }'
+          - '{ "tag_prefix": "debian-10",    "baseimage": "debian:10-slim", "platforms": "linux/amd64,linux/386,linux/arm/v7,linux/arm64/v8" }'
+          - '{ "tag_prefix": "debian-11",    "baseimage": "debian:11-slim", "platforms": "linux/amd64,linux/386,linux/arm/v7,linux/arm64/v8" }'
+          - '{ "tag_prefix": "ubuntu-20.04", "baseimage": "ubuntu:20.04",   "platforms": "linux/amd64,linux/arm/v7,linux/arm64/v8" }'
+          - '{ "tag_prefix": "ubuntu-22.04", "baseimage": "ubuntu:22.04",   "platforms": "linux/amd64,linux/arm/v7,linux/arm64/v8" }'
+
+    steps:
+      - name: Free disk space
+        run: |
+          # Free disk space.
+          echo "::group::Before"
+          df -h /
+          echo "::endgroup::"
+          echo "::group::Removing unneeded softwares and files..."
+          for DIR in /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          do
+            if [ -d "$DIR" ]; then
+                echo "Removing $DIR..."
+                sudo rm -r "$DIR"
+            fi
+          done
+          echo "::endgroup::"
+          echo "::group::After"
+          df -h /
+          echo "::endgroup::"
+
+      - name: Prepare
+        id: prep
+        run: |
+          # Determine the Docker container version.
+          VERSION=unknown
+          if [[ $GITHUB_REF =~ refs/tags/* ]]; then
+            # Git tag pushed: use tag as the version.
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [[ $GITHUB_REF =~ refs/heads/* ]]; then
+            # Git commit pushed: use the commit SHA as the version.
+            VERSION=${GITHUB_SHA::8}
+          elif [[ $GITHUB_REF =~ refs/pull/* ]]; then
+            # Pull request: use PR number as the version.
+            VERSION=pr-${{ github.event.number }}
+          else
+            echo "::error::Unexpected GITHUB_REF: $GITHUB_REF"
+            exit 1
+          fi
+          # Determine the version to put in container label.
+          LABEL_VERSION=${VERSION}
+          if [[ $GITHUB_REF =~ refs/tags/* ]]; then
+            LABEL_VERSION=${VERSION:1}
+          fi
+          # Determine the Docker container tags.
+          TAGS="${{ env.DOCKER_IMAGE_NAME }}:${{ fromJSON(matrix.info).tag_prefix }}-${VERSION}"
+          if [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # For version with format vX.Y.Z, we want to add additional tags:
+            #   - vX.Y
+            #   - vX
+            V=${VERSION:1}
+            MAJOR_MINOR=${V%.*}
+            MAJOR=${MAJOR_MINOR%.*}
+            TAGS="$TAGS,${{ env.DOCKER_IMAGE_NAME }}:${{ fromJSON(matrix.info).tag_prefix }}-v${MAJOR_MINOR}"
+            TAGS="$TAGS,${{ env.DOCKER_IMAGE_NAME }}:${{ fromJSON(matrix.info).tag_prefix }}-v${MAJOR}"
+          fi
+          # Determine the release type.
+          if [[ $GITHUB_REF =~ refs/tags/* ]]; then
+              IS_RELEASE=yes
+              if [[ $GITHUB_REF =~ -pre\.[0-9]+ ]]; then
+                  RELEASE_TYPE="pre"
+              else
+                  RELEASE_TYPE="standard"
+              fi
+          else
+              IS_RELEASE=no
+              RELEASE_TYPE="n/a"
+          fi
+          # Print results.
+          echo "::group::Results"
+          echo "Github reference: $GITHUB_REF"
+          echo "Release: $IS_RELEASE"
+          echo "Release type: $RELEASE_TYPE"
+          echo "Docker container version: $VERSION"
+          echo "Docker container version label: $LABEL_VERSION"
+          echo "Docker container tag(s): $TAGS"
+          echo "::endgroup::"
+          # Export outputs.
+          echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+          echo "release_type=${RELEASE_TYPE}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "label_version=${LABEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          #echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup BATS
+        uses: mig4/setup-bats@v1
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: arm,arm64,ppc64le,mips64,s390x
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: network=host
+
+      - name: Build and push to local registry
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          pull: true
+          provenance: false
+          platforms: ${{ fromJSON(matrix.info).platforms }}
+          tags: localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci
+          build-args: |
+            BASEIMAGE=${{ fromJSON(matrix.info).baseimage }}
+            IMAGE_VERSION=${{ steps.prep.outputs.label_version }}
+          cache-from: type=gha,scope=${{ fromJSON(matrix.info).tag_prefix }}
+          cache-to: type=gha,mode=max,scope=${{ fromJSON(matrix.info).tag_prefix }}
+
+      - name: Inspect
+        id: inspect
+        run: |
+          docker buildx imagetools inspect localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci
+          echo "raw=$(docker buildx imagetools inspect --raw localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci | tr -d '\n')" >> $GITHUB_OUTPUT
+
+      - name: Test image
+        run: |
+          for SHA in ${{ join(fromJSON(steps.inspect.outputs.raw).manifests.*.digest, ' ') }}
+          do
+            export DOCKER_IMAGE=localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci@$SHA
+            docker pull $DOCKER_IMAGE
+            docker run --rm $DOCKER_IMAGE sh -c 'echo Testing image on $(uname -m)...'
+            bats tests
+          done
+
+      - name: Login to DockerHub
+        if: ${{ steps.prep.outputs.is_release == 'yes' }}
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push to Dockerhub
+        # NOTE: The `--load` option of `buildx` only works with a single
+        #       platform.  Thus, we cannot build the image with `--load`, test
+        #       the image and then `docker push` it.  We need to build the image
+        #       twice, with different tags.  The second build should however
+        #       be very fast because of cache.  See:
+        #         - https://github.com/docker/buildx/issues/59
+        #         - https://github.com/docker/build-push-action/issues/132
+        if: ${{ steps.prep.outputs.is_release == 'yes' }}
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          provenance: false
+          platforms: ${{ fromJSON(matrix.info).platforms }}
+          tags: ${{ steps.prep.outputs.tags }}
+          build-args: |
+            BASEIMAGE=${{ fromJSON(matrix.info).baseimage }}
+            IMAGE_VERSION=${{ steps.prep.outputs.label_version }}
+          cache-from: type=gha,scope=${{ fromJSON(matrix.info).tag_prefix }}
+
+  post-build:
+    name: Post-build
+    needs: [ build ]
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Prepare
+        id: prep
+        run: |
+          # Determine the release type.
+          if [[ $GITHUB_REF =~ refs/tags/* ]]; then
+              IS_RELEASE=yes
+              if [[ $GITHUB_REF =~ -pre\.[0-9]+ ]]; then
+                  RELEASE_TYPE="pre"
+              else
+                  RELEASE_TYPE="standard"
+              fi
+          else
+              IS_RELEASE=no
+              RELEASE_TYPE="n/a"
+          fi
+          # Print results.
+          echo "::group::Results"
+          echo "Github reference: $GITHUB_REF"
+          echo "Release: $IS_RELEASE"
+          echo "Release type: $RELEASE_TYPE"
+          echo "::endgroup::"
+          # Export outputs.
+          echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+          echo "release_type=${RELEASE_TYPE}" >> $GITHUB_OUTPUT
