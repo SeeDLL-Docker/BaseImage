@@ -35,11 +35,11 @@ FROM --platform=$BUILDPLATFORM alpine:3.18 AS cinit
 ARG TARGETPLATFORM
 COPY --from=xx / /
 COPY src/cinit /tmp/cinit
-RUN apk --no-cache add make clang && \
-    xx-apk --no-cache add gcc musl-dev && \
-    CC=xx-clang \
-    make -C /tmp/cinit && \
-    xx-verify --static /tmp/cinit/cinit
+RUN apk --no-cache add make clang
+RUN xx-apk --no-cache add gcc musl-dev
+RUN CC=xx-clang \
+    make -C /tmp/cinit
+RUN xx-verify --static /tmp/cinit/cinit
 COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/cinit/cinit
 
@@ -49,11 +49,11 @@ ARG TARGETPLATFORM
 ARG TARGETARCH
 COPY --from=xx / /
 COPY src/logmonitor /tmp/logmonitor
-RUN apk --no-cache add make clang && \
-    xx-apk --no-cache add gcc musl-dev linux-headers && \
-    CC=xx-clang \
-    make -C /tmp/logmonitor && \
-    xx-verify --static /tmp/logmonitor/logmonitor
+RUN apk --no-cache add make clang
+RUN xx-apk --no-cache add gcc musl-dev linux-headers
+RUN CC=xx-clang \
+    make -C /tmp/logmonitor
+RUN xx-verify --static /tmp/logmonitor/logmonitor
 COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/logmonitor/logmonitor
 
@@ -61,15 +61,15 @@ RUN upx /tmp/logmonitor/logmonitor
 FROM --platform=$BUILDPLATFORM alpine:3.18 AS su-exec
 ARG TARGETPLATFORM
 COPY --from=xx / /
-RUN apk --no-cache add curl make clang && \
-    xx-apk --no-cache add gcc musl-dev && \
-    mkdir /tmp/su-exec && \
-    curl -# -L https://github.com/ncopa/su-exec/archive/v0.2.tar.gz | tar xz --strip 1 -C /tmp/su-exec && \
-    CC=xx-clang \
+RUN apk --no-cache add curl make clang
+RUN xx-apk --no-cache add gcc musl-dev
+RUN mkdir /tmp/su-exec
+RUN curl -# -L https://github.com/ncopa/su-exec/archive/v0.2.tar.gz | tar xz --strip 1 -C /tmp/su-exec
+RUN CC=xx-clang \
     CFLAGS="-Os -fomit-frame-pointer" \
     LDFLAGS="-static -Wl,--strip-all" \
-    make -C /tmp/su-exec && \
-    xx-verify --static /tmp/su-exec/su-exec
+    make -C /tmp/su-exec
+RUN xx-verify --static /tmp/su-exec/su-exec
 COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/su-exec/su-exec
 
@@ -78,8 +78,8 @@ FROM --platform=$BUILDPLATFORM alpine:3.18 AS logrotate
 ARG TARGETPLATFORM
 COPY --from=xx / /
 COPY src/logrotate /tmp/build
-RUN /tmp/build/build.sh && \
-    xx-verify --static /tmp/logrotate-install/usr/sbin/logrotate
+RUN /tmp/build/build.sh
+RUN xx-verify --static /tmp/logrotate-install/usr/sbin/logrotate
 COPY --from=upx /usr/bin/upx /usr/bin/upx
 RUN upx /tmp/logrotate-install/usr/sbin/logrotate
 
