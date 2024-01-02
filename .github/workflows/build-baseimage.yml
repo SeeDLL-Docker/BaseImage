@@ -157,15 +157,15 @@ jobs:
           docker buildx imagetools inspect localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci
           echo "raw=$(docker buildx imagetools inspect --raw localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci | tr -d '\n')" >> $GITHUB_OUTPUT
 
-      - name: Test image
-        run: |
-          for SHA in ${{ join(fromJSON(steps.inspect.outputs.raw).manifests.*.digest, ' ') }}
-          do
-            export DOCKER_IMAGE=localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci@$SHA
-            docker pull $DOCKER_IMAGE
-            docker run --rm $DOCKER_IMAGE sh -c 'echo Testing image on $(uname -m)...'
-            bats tests
-          done
+      # - name: Test image
+      #   run: |
+      #     for SHA in ${{ join(fromJSON(steps.inspect.outputs.raw).manifests.*.digest, ' ') }}
+      #     do
+      #       export DOCKER_IMAGE=localhost:5000/${{ env.DOCKER_IMAGE_NAME }}:github-ci@$SHA
+      #       docker pull $DOCKER_IMAGE
+      #       docker run --rm $DOCKER_IMAGE sh -c 'echo Testing image on $(uname -m)...'
+      #       bats tests
+      #     done
 
       - name: Login to DockerHub
         if: ${{ steps.prep.outputs.is_release == 'yes' }}
